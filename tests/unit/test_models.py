@@ -45,6 +45,6 @@ def test_tarefa_com_titulo_vazio_deve_lancar_erro():
     with pytest.raises(ValueError, match="O título da tarefa não pode ser vazio."):
         Todo(id=1, title="")
 
-    with pytest.raises(ValueError, match="The title of the task cannot be empty."):
+    with pytest.raises(ValueError, match="O título da tarefa não pode ser vazio."):
         Todo(id=2, title="   ")
 
