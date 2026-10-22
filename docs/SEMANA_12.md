@@ -88,58 +88,47 @@ O prefixo pode seguir o padrão da equipe (`feature/`, `fix/` ou `test/`). O req
 git branch --show-current
 ```
 
-### 3.3 Reproduzir o cenário e implementar a cobertura
+### 3.3 Acrescentar o teste de integração
 
-O arquivo a alterar é `tests/integration/test_routes.py`. Acrescente um teste para `POST /api/todos` com `json={"title": "   "}`. Verifique o status HTTP 400, a presença da chave `error` no JSON e que uma consulta posterior à listagem não contém uma tarefa criada pela requisição inválida. Mantenha também o teste existente para ausência do campo.
+No arquivo `tests/integration/test_routes.py`, mantenha o teste existente de listagem inicial e acrescente a função abaixo. Ela cobre os dois casos de título inválido — ausente e composto apenas por espaços — e confirma que nenhum deles cria uma tarefa:
 
-Execute primeiro a camada afetada:
+```python
+def test_api_criar_tarefa_com_titulo_ausente_ou_em_branco_deve_retornar_400(client):
+    """
+    Verifica que a API rejeita tarefas sem título ou com título composto
+    apenas por espaços, e que nenhuma delas é adicionada à lista.
+    """
+    payloads_invalidos = [
+        {"description": "Sem título"},
+        {"description": "Título em branco", "title": "   "},
+    ]
 
-```bash
-python -m pytest -v tests/integration/test_routes.py
+    for payload in payloads_invalidos:
+        response = client.post("/api/todos", json=payload)
+
+        assert response.status_code == 400
+        assert "error" in response.get_json()
+
+    response = client.get("/api/todos")
+    assert response.status_code == 200
+    assert response.get_json() == []
 ```
 
-Depois rode as três camadas e o mesmo gate de cobertura que será usado no CI:
+Nesta etapa, não rode os testes localmente; eles serão executados pela pipeline após a atualização do workflow.
 
-```bash
-python -m pytest -v tests/unit
-python -m pytest -v tests/integration
-python -m pytest -v tests/e2e
-python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=80 tests/
-```
+### 3.4 Fazer o commit do teste
 
-O último comando só deve passar se a cobertura calculada em `app` for igual ou superior a 80%. Se o comportamento já estiver correto e apenas faltava o teste, não mude a lógica da aplicação sem necessidade. Se um teste expuser um defeito, corrija a causa e registre a mudança na PR.
-
-### 3.4 Registrar mudanças em commits pequenos
-
-Confira o diff e os arquivos que serão enviados:
+Confira as alterações e faça o commit somente do arquivo de teste:
 
 ```bash
 git diff --check
-git diff
+git diff -- tests/integration/test_routes.py
 git status --short
-```
-
-Adicione os arquivos intencionais e faça commit. Exemplo para a cobertura:
-
-```bash
 git add tests/integration/test_routes.py
-git commit -m "test(api): cobrir título composto por espaços"
+git commit -m "test(api): cobrir títulos inválidos na criação"
 ```
 
-O workflow é uma alteração lógica separada; quando estiver pronta, faça outro commit:
-
-```bash
-git add .github/workflows/ci.yml
-git commit -m "ci: executar quality gate em pull requests"
-```
-
-Se a equipe preferir um único commit para uma mudança pequena, isso também é válido. Não use `git add .` sem conferir `git status`, para evitar incluir `.coverage`, caches, ambiente virtual ou arquivos da IDE. O `.gitignore` já ignora vários desses artefatos.
-
-Envie a branch ao remoto:
-
-```bash
-git push -u origin test/12-cobrir-titulo-com-espacos
-```
+Depois do commit, siga para o Passo 4 e atualize o workflow. Não use `git add .` sem conferir `git status`, para evitar incluir caches, ambiente virtual ou arquivos da IDE.
 
 ## Passo 4 — Atualizar o workflow de CI para atuar como Quality Gate
 
@@ -195,6 +184,19 @@ O parâmetro `--select=E9,F63,F7,F82` usa o Flake8 para sinalizar erros graves d
 Antes de enviar, valide a sintaxe e o diff do YAML por revisão. A configuração apresentada mede cobertura de `app/`; não use `--cov=src`, porque não existe uma pasta `src` neste projeto. A versão do Python está alinhada ao workflow atual; se mudar a versão, faça isso deliberadamente e valide as dependências.
 
 Se a equipe escolher GitFlow com `develop`, primeiro combine o fluxo e crie a branch de integração a partir de `main`. Depois acrescente `develop` aos filtros de `push` e `pull_request`, abra PRs de feature para `develop` e defina como `develop` será promovida a `main`. Não adicione `develop` ao YAML isoladamente sem configurar o destino das PRs e a política correspondente.
+
+Depois de atualizar o workflow, revise o diff, faça o commit e envie a branch com o commit do teste e o commit do CI:
+
+```bash
+git diff --check
+git diff -- .github/workflows/ci.yml
+git status --short
+git add .github/workflows/ci.yml
+git commit -m "ci: executar quality gate em pull requests"
+git push -u origin test/12-cobrir-titulo-com-espacos
+```
+
+Se a branch já tiver sido enviada antes, use apenas `git push`. A pipeline então executará os testes, o lint e a cobertura na PR; siga para o Passo 5 para abrir a Pull Request e acompanhar o resultado.
 
 ### Alternativa: manter jobs separados
 
