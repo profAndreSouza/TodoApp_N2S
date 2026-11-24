@@ -4,10 +4,10 @@ Este roteiro adapta a atividade da Semana 12 ao repositório `TodoApp_N2S`. Ele 
 
 ## Antes de começar: como o projeto está hoje
 
-- O projeto já é um repositório Git; o remoto configurado é `origin` (`profAndreSouza/TodoApp_N2S`) e a branch atual de trabalho é `main`. Não execute `git init` nem crie outro repositório.
+- O projeto já é um repositório Git; `main` é a branch base. Não execute `git init` nem crie outro repositório.
 - A API Flask fica em `app/`. Os testes ficam em `tests/unit`, `tests/integration` e `tests/e2e`.
 - `requirements.txt` já inclui Flask, pytest, pytest-cov e Flake8.
-- `.github/workflows/ci.yml` roda os três grupos de testes quando há `push` para `main`. No momento, não roda em Pull Requests, não faz lint e não verifica cobertura.
+- `.github/workflows/ci.yml` executa em `push` e `pull_request` para `main`, com lint, testes unitários, integração, E2E e cobertura mínima de 80%. O guia usa o GitHub Actions como validação, sem rodar testes localmente.
 - A aplicação já rejeita título de tarefa vazio ou composto por espaços. Os testes de integração já cobrem a ausência do campo `title`; a atividade prática deste guia acrescentará cobertura explícita para título formado apenas por espaços.
 - GitHub Projects, PRs e regras de proteção são configurados no GitHub. O guia não cria Issues, branches ou regras remotamente; ele dá os passos para a equipe fazê-lo.
 
@@ -60,9 +60,24 @@ Link da Pull Request e link da execução de CI com todos os checks verdes.
 
 O cartão acompanha o trabalho. A branch, os commits, a PR e os checks registram a mudança no código. Ao longo da atividade, mantenha ambos coerentes.
 
-## Passo 3 — Preparar o ambiente e criar uma branch rastreável
+## Passo 3 — Configurar proteção para que o gate seja obrigatório
 
-### 3.1 Sincronizar a branch base
+Configure a proteção da `main` antes de criar a branch de trabalho. Exija Pull Request e checks obrigatórios; o merge deve ficar bloqueado enquanto o check do GitHub Actions estiver pendente ou falhar. Se o check ainda não aparecer na lista, salve a regra exigindo PR e volte assim que o workflow publicar o check. Selecione o nome do job exibido na PR e conclua essa seleção antes de qualquer merge.
+
+1. No GitHub, abra **Settings** do repositório. Procure **Rules → Rulesets** ou **Branches → Branch protection rules**, conforme a interface disponível e as permissões da conta.
+2. Crie uma regra direcionada à branch `main` (por padrão, branch alvo `main`; não aplique acidentalmente a todas as branches sem decisão da equipe).
+3. Ative a exigência de Pull Request antes do merge. Defina uma aprovação mínima — por exemplo, uma — e habilite resolução de conversas se essa for a política da equipe.
+4. Ative **Require status checks to pass before merging** e marque como obrigatório o check do job `qualidade`. Se o check ainda não aparecer na lista, volte depois da primeira execução do workflow em uma PR e selecione o nome publicado. Não faça merge antes de selecionar esse check.
+5. Se houver a opção **Require branches to be up to date before merging**, decida se querem que a branch de PR incorpore os commits mais recentes de `main` antes do merge. Ative-a somente se o time puder manter esse fluxo.
+6. Considere impedir force push e exclusão da branch protegida. Decida explicitamente se administradores e mantenedores também devem estar sujeitos à regra.
+7. Salve e confira o resumo da regra, branch alvo e bypass list antes de concluir.
+8. Salve a regra e confira se `main` é o único alvo.
+
+Quando o workflow executar em uma PR, confirme que o check do job `qualidade` aparece como obrigatório e foi publicado para o último commit. Um check pendente ou com falha bloqueia o merge; confira também se `main` é o alvo da regra.
+
+## Passo 4 — Preparar o ambiente e criar uma branch rastreável
+
+### 4.1 Sincronizar a branch base
 
 No terminal, na raiz do repositório:
 
@@ -74,42 +89,49 @@ git pull --ff-only origin main
 
 Antes de trocar de branch, confira `git status --short`. Se houver alterações locais que não pertencem a esta atividade, salve-as em um commit próprio ou use `git stash push -m "trabalho em andamento"` e recupere-as depois. Não descarte trabalho local sem revisar.
 
-### 3.2 Criar a branch da Issue
+### 4.2 Criar a branch da Issue
 
 Substitua `12` pelo número real da Issue:
 
 ```bash
-git switch -c test/12-cobrir-titulo-com-espacos
+git switch -c feature/12-cobrir-titulo-com-espacos
 ```
 
-O prefixo pode seguir o padrão da equipe (`feature/`, `fix/` ou `test/`). O requisito é manter o número e uma descrição curta. Para conferir:
+Use Gitflow sem `develop`: branches de trabalho partem de `main` e usam `feature/<número>-<descrição>` para funcionalidades e melhorias, incluindo testes, ou `hotfix/<número>-<descrição>` para correções urgentes. Nesta atividade, use `feature/12-cobrir-titulo-com-espacos`. Não crie `develop`. Para conferir:
 
 ```bash
 git branch --show-current
 ```
 
-### 3.3 Reproduzir o cenário e implementar a cobertura
+### 4.3 Adicionar o teste de integração
 
-O arquivo a alterar é `tests/integration/test_routes.py`. Acrescente um teste para `POST /api/todos` com `json={"title": "   "}`. Verifique o status HTTP 400, a presença da chave `error` no JSON e que uma consulta posterior à listagem não contém uma tarefa criada pela requisição inválida. Mantenha também o teste existente para ausência do campo.
+No arquivo `tests/integration/test_routes.py`, adicione o teste abaixo. Ele verifica que as requisições sem título ou com título formado apenas por espaços retornam HTTP 400 e não criam tarefas.
 
-Execute primeiro a camada afetada:
+```python
+def test_api_criar_tarefa_com_titulo_ausente_ou_em_branco_deve_retornar_400(client):
+    """
+    Verifica que a API rejeita tarefas sem título ou com título composto
+    apenas por espaços, e que nenhuma delas é adicionada à lista.
+    """
+    payloads_invalidos = [
+        {"description": "Sem título"},
+        {"description": "Título em branco", "title": "   "},
+    ]
 
-```bash
-python -m pytest -v tests/integration/test_routes.py
+    for payload in payloads_invalidos:
+        response = client.post("/api/todos", json=payload)
+
+        assert response.status_code == 400
+        assert "error" in response.get_json()
+
+    response = client.get("/api/todos")
+    assert response.status_code == 200
+    assert response.get_json() == []
 ```
 
-Depois rode as três camadas e o mesmo gate de cobertura que será usado no CI:
+Nesta atividade, pule a execução local dos testes. Faça commit e envie a branch; depois abra ou atualize a Pull Request para `main`. O GitHub Actions executará lint, testes e cobertura. Acompanhe a aba **Checks** da PR e corrija qualquer falha antes do merge.
 
-```bash
-python -m pytest -v tests/unit
-python -m pytest -v tests/integration
-python -m pytest -v tests/e2e
-python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=80 tests/
-```
-
-O último comando só deve passar se a cobertura calculada em `app` for igual ou superior a 80%. Se o comportamento já estiver correto e apenas faltava o teste, não mude a lógica da aplicação sem necessidade. Se um teste expuser um defeito, corrija a causa e registre a mudança na PR.
-
-### 3.4 Registrar mudanças em commits pequenos
+### 4.4 Registrar mudanças em commits pequenos
 
 Confira o diff e os arquivos que serão enviados:
 
@@ -138,12 +160,12 @@ Se a equipe preferir um único commit para uma mudança pequena, isso também é
 Envie a branch ao remoto:
 
 ```bash
-git push -u origin test/12-cobrir-titulo-com-espacos
+git push -u origin feature/12-cobrir-titulo-com-espacos
 ```
 
-## Passo 4 — Atualizar o workflow de CI para atuar como Quality Gate
+## Passo 5 — Atualizar o workflow de CI para atuar como Quality Gate
 
-Edite `.github/workflows/ci.yml`. O arquivo atual já possui jobs separados para unitários, integração e E2E, mas só dispara em `push` para `main`. Para começar com o fluxo existente, adicione execução em PR para `main`, permissões mínimas de leitura, lint e cobertura. Abaixo está uma versão compacta, em um único job, usando ferramentas que já constam em `requirements.txt` e Python 3.11, que o workflow atual já utiliza:
+Confira `.github/workflows/ci.yml`: o workflow deve executar em `push` e `pull_request` para `main`, com lint, testes unitários, integração, E2E e o gate de cobertura. Se algum item estiver ausente, ajuste o YAML para corresponder ao exemplo abaixo. O job de qualidade publicado pelo Actions é o check a ser exigido pela proteção da branch.
 
 ```yaml
 name: Pipeline CI
@@ -190,20 +212,20 @@ jobs:
         run: python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=80 tests/
 ```
 
-O parâmetro `--select=E9,F63,F7,F82` usa o Flake8 para sinalizar erros graves de sintaxe e nomes não definidos, sem exigir que todo o código legado esteja formatado segundo todas as regras. Depois que a equipe revisar e corrigir os avisos existentes, pode ampliar o lint para `flake8 app tests --statistics`. Não torne uma regra mais ampla obrigatória antes de saber quais falhas ela produzirá.
+Lint é uma análise estática: Flake8 lê o código sem executá-lo e aplica regras. `E9` aponta erros graves de sintaxe; `F63` e `F7`, construções inválidas; `F82`, nomes usados sem definição. Esse gate não formata o código nem mede a qualidade dos testes. Se falhar, o job fica vermelho e o check obrigatório bloqueia o merge. Depois de corrigir os avisos existentes, a equipe pode ampliar para `flake8 app tests --statistics`, que inclui regras de estilo e outros possíveis defeitos.
 
-Antes de enviar, valide a sintaxe e o diff do YAML por revisão. A configuração apresentada mede cobertura de `app/`; não use `--cov=src`, porque não existe uma pasta `src` neste projeto. A versão do Python está alinhada ao workflow atual; se mudar a versão, faça isso deliberadamente e valide as dependências.
+Antes de enviar, revise o YAML e o diff. A configuração mede cobertura de `app/`, não `src/`. Cobertura é a proporção de linhas executáveis da aplicação percorridas pelos testes. O limite de 80% exige que pelo menos 80 de cada 100 linhas contabilizadas sejam exercitadas; pytest-cov encerra com falha abaixo desse valor. Isso não significa que 80% dos testes passaram nem garante bons cenários: asserções relevantes continuam necessárias. `term-missing` lista linhas não cobertas para orientar novos testes.
 
-Se a equipe escolher GitFlow com `develop`, primeiro combine o fluxo e crie a branch de integração a partir de `main`. Depois acrescente `develop` aos filtros de `push` e `pull_request`, abra PRs de feature para `develop` e defina como `develop` será promovida a `main`. Não adicione `develop` ao YAML isoladamente sem configurar o destino das PRs e a política correspondente.
+Neste roteiro, `main` é a branch base e destino das PRs. Branches `feature/*` e `hotfix/*` partem da `main` atualizada e retornam por Pull Request para `main`; não há branch `develop`.
 
 ### Alternativa: manter jobs separados
 
 Jobs independentes podem dar diagnóstico paralelo e preservar a organização atual do workflow. Nesse caso, adicione o lint e cobertura como jobs ou steps com nomes claros e faça o job de cobertura depender dos três grupos de teste, se quiser um check agregador. A proteção de branch deverá exigir o check agregador que realmente aparecer na PR. Evite duplicar todos os testes sem uma razão de feedback ou isolamento.
 
-## Passo 5 — Abrir a Pull Request e ligar as evidências
+## Passo 6 — Abrir a Pull Request e ligar as evidências
 
 1. No GitHub, abra a página do repositório. A notificação da branch enviada costuma oferecer **Compare & pull request**; alternativamente, abra **Pull requests → New pull request**.
-2. Selecione a branch de destino `main` e a branch de origem `test/12-cobrir-titulo-com-espacos`. Confira a direção: a branch de trabalho deve entrar em `main`.
+2. Selecione a branch de destino `main` e a branch de origem `feature/12-cobrir-titulo-com-espacos`. Confira a direção: a branch de trabalho deve entrar em `main`.
 3. Use um título claro, por exemplo **`test(api): cobrir rejeição de título composto por espaços`**.
 4. Preencha o corpo. Substitua o número da Issue e remova itens que não se aplicam:
 
@@ -216,11 +238,7 @@ Closes #12
 - Atualiza o CI para executar em Pull Requests e verificar lint, testes e cobertura.
 
 ## Como validar
-- `python -m pytest -v tests/integration/test_routes.py`
-- `python -m pytest -v tests/unit`
-- `python -m pytest -v tests/integration`
-- `python -m pytest -v tests/e2e`
-- `python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=80 tests/`
+- Confira na aba **Checks** da PR se lint, testes unitários, integração, E2E e cobertura mínima de 80% passaram no commit mais recente.
 
 ## Riscos e reversão
 - Risco: o limite de cobertura pode revelar cobertura geral abaixo de 80%.
@@ -233,13 +251,13 @@ Closes #12
 - [ ] Checks do CI concluídos
 ```
 
-5. `Closes #12` associa a PR à Issue e a fecha quando a PR entra na branch padrão. Se a PR for direcionada a `develop`, prefira `Relates to #12` e feche a Issue quando a mudança atingir a branch padrão, ou use a política acordada pela equipe.
+5. `Closes #12` associa a PR à Issue e a fecha quando a PR entra em `main`.
 6. Crie a PR como **Draft** se o trabalho ainda não estiver pronto para revisão; marque como **Ready for review** quando estiver completo.
 7. Confira se o cartão do Project foi movido para `Em revisão` e se a PR aparece relacionada à Issue. Registre o link da PR para a auditoria.
 
-## Passo 6 — Revisar a mudança, acompanhar checks e corrigir falhas
+## Passo 7 — Revisar a mudança, acompanhar checks e corrigir falhas
 
-### 6.1 Revisão humana
+### 7.1 Revisão humana
 
 Peça a uma pessoa revisora para verificar:
 
@@ -251,12 +269,12 @@ Peça a uma pessoa revisora para verificar:
 
 Comente as dúvidas na linha relevante do diff. A autora deve responder e marcar conversas resolvidas depois que a correção for revisada.
 
-### 6.2 Acompanhar o CI
+### 7.2 Acompanhar o CI
 
 1. Na PR, consulte a seção **Checks** ou a aba **Actions** para ver a execução iniciada pelo evento `pull_request`.
 2. Espere cada job terminar. `Success` significa que aquele comando passou naquele commit; um workflow executado não bloqueia merge automaticamente até que a regra de proteção exija seu check.
 3. Abra os logs do step que falhou e identifique a primeira mensagem de erro relevante. Não esconda falhas com `continue-on-error`.
-4. Reproduza localmente o comando que falhou, a partir da raiz do projeto, usando o mesmo Python e as dependências do `requirements.txt`.
+4. Não rode os testes localmente nesta atividade. Consulte o log do step com falha no GitHub Actions, corrija a causa e envie um novo commit para a mesma branch; a PR iniciará outra execução automaticamente.
 5. Corrija a causa. Para uma regressão de código, corrija implementação ou teste conforme o comportamento acordado; não altere um teste apenas para fazê-lo passar sem justificativa.
 6. Faça commit e envie para a mesma branch:
 
@@ -268,26 +286,11 @@ git push
 
 7. A PR será atualizada e os checks rodarão novamente para o novo commit. Confirme que a revisão continua válida e que todos os checks exigidos estão verdes.
 
-## Passo 7 — Configurar proteção para que o gate seja obrigatório
-
-Faça esta configuração depois que a PR tiver executado o workflow pelo menos uma vez, para que o nome do check apareça na interface.
-
-1. No GitHub, abra **Settings** do repositório. Procure **Rules → Rulesets** ou **Branches → Branch protection rules**, conforme a interface disponível e as permissões da conta.
-2. Crie uma regra direcionada à branch `main` (por padrão, branch alvo `main`; não aplique acidentalmente a todas as branches sem decisão da equipe).
-3. Ative a exigência de Pull Request antes do merge. Defina uma aprovação mínima — por exemplo, uma — e habilite resolução de conversas se essa for a política da equipe.
-4. Ative a exigência de checks/status checks. Selecione o nome exibido para o job `qualidade` (ou o check equivalente da configuração realmente executada). Não adivinhe o nome: escolha o check que aparece na PR.
-5. Se houver a opção **Require branches to be up to date before merging**, decida se querem que a branch de PR incorpore os commits mais recentes de `main` antes do merge. Ative-a somente se o time puder manter esse fluxo.
-6. Considere impedir force push e exclusão da branch protegida. Decida explicitamente se administradores e mantenedores também devem estar sujeitos à regra.
-7. Salve e confira o resumo da regra, branch alvo e bypass list antes de concluir.
-8. Se adotarem `develop`, crie uma regra separada para ela. Escolha os checks e aprovações compatíveis com o papel de integração dessa branch.
-
-Após salvar, confira na PR se o GitHub mostra os checks como obrigatórios. Um check obrigatório precisa ser publicado para o último commit da PR. Filtros de evento que impeçam o workflow de rodar ou um nome de check selecionado incorretamente podem deixar o merge bloqueado aguardando um check inexistente.
-
 ## Passo 8 — Fazer uma falha controlada e provar recuperação
 
 Faça a simulação em uma branch descartável separada, ligada a uma Issue de exercício, para não misturar a regressão com a mudança real:
 
-1. Crie uma branch como `test/13-demonstrar-bloqueio-ci` a partir da branch base atualizada.
+1. Crie uma branch como `feature/13-demonstrar-bloqueio-ci` a partir da branch base atualizada.
 2. Introduza uma falha temporária e pequena, por exemplo, altere em um teste uma expectativa de status HTTP para um valor que a API não retorna. Não mude comportamento de produção para criar a falha.
 3. Abra uma PR de exercício contra a branch protegida e confirme que o check falha e que a regra impede o merge.
 4. Registre o link da PR e o nome do check que a bloqueou.
@@ -297,7 +300,7 @@ Faça a simulação em uma branch descartável separada, ligada a uma Issue de e
 
 ```bash
 git switch main
-git branch -d test/13-demonstrar-bloqueio-ci
+git branch -d feature/13-demonstrar-bloqueio-ci
 ```
 
 Não use `git branch -D` como rotina: a opção forçada pode apagar commits ainda não integrados.
